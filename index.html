@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Block Blast: AI Logic Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --cell-size: 40px;
+            --gap: 4px;
+        }
+
+        @media (max-width: 600px) {
+            :root {
+                --cell-size: 11vw;
+                --gap: 1vw;
+            }
+        }
+
+        body {
+            background-color: #1a1a2e;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        /* The Grid Board */
+        #game-board {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: var(--gap);
+            width: fit-content;
+            padding: 10px;
+            background: #16213e;
+            border-radius: 12px;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+            margin: 0 auto;
+        }
+
+        .cell {
+            width: var(--cell-size);
+            height: var(--cell-size);
+            background-color: #0f3460;
+            border-radius: 6px;
+            transition: background-color 0.2s, transform 0.1s;
+        }
+
+        .cell.filled {
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .cell.clearing {
+            animation: blast 0.4s ease-out forwards;
+        }
+
+        @keyframes blast {
+            0% { transform: scale(1); filter: brightness(1.5); }
+            50% { transform: scale(0.5); opacity: 0.5; }
+            100% { transform: scale(0); opacity: 0; }
+        }
+
+        /* Draggable Shapes */
+        #dock {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            height: 160px;
+            width: 100%;
+            max-width: 500px;
+            margin: 20px auto 0;
+            padding: 10px;
+        }
+
+        .shape-container {
+            width: 30%;
+            height: 100px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .mini-grid {
+            display: grid;
+            gap: 2px;
+            pointer-events: none;
+        }
+
+        .mini-cell {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+        }
+
+        /* Dragging Ghost */
+        .dragging-ghost {
+            position: fixed;
+            pointer-events: none;
+            z-index: 1000;
+            opacity: 0.8;
+            transform: translate(-50%, -100%);
+            display: grid;
+            gap: var(--gap);
+        }
+        
+        .dragging-ghost .ghost-cell {
+            border-radius: 6px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+        }
+
+        /* UI Elements */
+        .btn {
+            background: #e94560;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        .btn:active { transform: scale(0.95); }
+        .btn-blue { background: #4560e9; }
+
+        /* Preview Highlight on Board */
+        .cell.preview-valid {
+            background-color: rgba(255, 255, 255, 0.3) !important;
+            border: 2px dashed rgba(255,255,255,0.5);
+        }
+        .cell.preview-invalid {
+            background-color: rgba(255, 0, 0, 0.2) !important;
+        }
+
+        /* Block Colors */
+        .c-1 { background-color: #FF5252; } /* Red */
+        .c-2 { background-color: #448AFF; } /* Blue */
+        .c-3 { background-color: #69F0AE; } /* Green */
+        .c-4 { background-color: #FFD740; } /* Yellow */
+        .c-5 { background-color: #E040FB; } /* Purple */
+        .c-6 { background-color: #FF9E80; } /* Orange */
+
+    </style>
+</head>
+<body class="flex flex-col h-screen select-none">
+
+    <!-- Header -->
+    <div class="flex justify-between items-center p-4 max-w-lg mx-auto w-full">
+        <div>
+            <div class="text-xs text-gray-400">SCORE</div>
+            <div id="score-display" class="text-2xl font-bold text-white">0</div>
+        </div>
+        <div class="text-center">
+             <div class="text-xs text-gray-400">MOVES</div>
+             <div id="moves-display" class="text-xl font-mono text-yellow-400">0</div>
+        </div>
+        <button id="restart-btn" class="btn text-sm">RESTART</button>
+    </div>
+
+    <!-- Mode Indicator -->
+    <div id="mode-badge" class="text-center text-xs font-bold tracking-widest uppercase mb-4 text-blue-400">
+        DIFFICULTY: EASY
+    </div>
+
+    <!-- Game Board -->
+    <div class="flex-grow flex items-center justify-center">
+        <div id="game-board">
+            <!-- Grid generated by JS -->
+        </div>
+    </div>
+
+    <!-- Shape Dock -->
+    <div id="dock">
+        <!-- Shapes generated by JS -->
+    </div>
+
+    <!-- Overlay / Menu -->
+    <div id="menu-overlay" class="fixed inset-0 bg-black/90 z-50 flex flex-col items-center justify-center space-y-6">
+        <h1 class="text-4xl font-bold text-white mb-4">BLOCK BLAST</h1>
+        <div class="text-gray-300 mb-8 max-w-xs text-center text-sm">
+            8x8 Grid. Fill rows or columns.
+        </div>
+        
+        <button onclick="startGame('easy')" class="w-64 p-4 bg-green-500 rounded-xl font-bold text-xl shadow-lg hover:bg-green-600 transition">
+            EASY MODE
+            <div class="text-xs font-normal opacity-75 mt-1">Smart AI gives you winning pieces.</div>
+        </button>
+
+        <button onclick="startGame('hard')" class="w-64 p-4 bg-red-600 rounded-xl font-bold text-xl shadow-lg hover:bg-red-700 transition">
+            HARD MODE
+            <div class="text-xs font-normal opacity-75 mt-1">Forced loss at move 45+.</div>
+        </button>
+    </div>
+
+    <!-- Game Over Modal -->
+    <div id="game-over-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex flex-col items-center justify-center">
+        <h2 class="text-5xl font-bold text-red-500 mb-2">GAME OVER</h2>
+        <div class="text-2xl text-white mb-6">Score: <span id="final-score">0</span></div>
+        <div class="text-xl text-yellow-400 mb-8">Moves Survived: <span id="final-moves">0</span></div>
+        <button onclick="document.getElementById('game-over-modal').classList.add('hidden'); document.getElementById('menu-overlay').classList.remove('hidden');" class="btn btn-blue">MAIN MENU</button>
+    </div>
+
+    <script>
+        const BOARD_SIZE = 8;
+        let grid = [];
+        let score = 0;
+        let moves = 0;
+        let difficulty = 'easy';
+        let currentShapes = [null, null, null];
+        
+        // Shape Definitions (Base Orientations)
+        const SHAPES = {
+            dot: [[1]],
+            
+            bar2: [[1, 1]], 
+            bar3: [[1, 1, 1]], 
+            bar4: [[1, 1, 1, 1]], 
+            bar5: [[1, 1, 1, 1, 1]], 
+            
+            sq2: [[1, 1], [1, 1]],
+            sq3: [[1, 1, 1], [1, 1, 1], [1, 1, 1]], 
+
+            l2: [[1, 0], [1, 1]],
+            l3: [[1, 0, 0], [1, 1, 1]], 
+            l3r: [[0, 0, 1], [1, 1, 1]], 
+            
+            t3: [[0, 1, 0], [1, 1, 1]],
+            z3: [[1, 1, 0], [0, 1, 1]],
+            s3: [[0, 1, 1], [1, 1, 0]]
+        };
+
+        const COLOR_MAP = {
+            dot: 'c-1', bar2: 'c-2', sq2: 'c-4',
+            bar3: 'c-3', l2: 'c-5', l3: 'c-6',
+            bar4: 'c-1', bar5: 'c-2',
+            sq3: 'c-1', t3: 'c-5', z3: 'c-4', s3: 'c-4',
+            l3r: 'c-6'
+        };
+
+        // --- Core Init ---
+
+        function initGrid() {
+            grid = Array(BOARD_SIZE).fill().map(() => Array(BOARD_SIZE).fill(0));
+            const boardEl = document.getElementById('game-board');
+            boardEl.innerHTML = '';
+            
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.dataset.r = r;
+                    cell.dataset.c = c;
+                    boardEl.appendChild(cell);
+                }
+            }
+        }
+
+        function startGame(mode) {
+            difficulty = mode;
+            document.getElementById('menu-overlay').classList.add('hidden');
+            document.getElementById('game-over-modal').classList.add('hidden');
+            document.getElementById('mode-badge').innerText = `DIFFICULTY: ${mode.toUpperCase()}`;
+            
+            score = 0;
+            moves = 0;
+            grid = Array(BOARD_SIZE).fill().map(() => Array(BOARD_SIZE).fill(0));
+            
+            updateUI();
+            initGrid();
+            spawnShapes();
+        }
+
+        document.getElementById('restart-btn').addEventListener('click', () => {
+             document.getElementById('menu-overlay').classList.remove('hidden');
+        });
+
+        // --- Intelligent Spawning Logic ---
+
+        function spawnShapes() {
+            const dock = document.getElementById('dock');
+            dock.innerHTML = '';
+            currentShapes = [];
+
+            for (let i = 0; i < 3; i++) {
+                let shapeData = getSmartShape();
+                let shapeKey = shapeData.key;
+                let shapeMatrix = shapeData.matrix;
+                
+                // If it's hard mode < 45 or easy mode, we might rotate randoms
+                // But for "Impossible" mode, we want the specific orientation that failed
+                if (difficulty === 'easy' || (difficulty === 'hard' && moves < 45)) {
+                    // Random rotations for variety unless it's a specific needed piece
+                    if (!shapeData.fixed) {
+                        const rotations = Math.floor(Math.random() * 4);
+                        for(let r=0; r<rotations; r++) {
+                            shapeMatrix = rotateMatrix(shapeMatrix);
+                        }
+                    }
+                }
+
+                currentShapes[i] = { key: shapeKey, data: shapeMatrix, used: false, id: i };
+                
+                const container = document.createElement('div');
+                container.className = 'shape-container';
+                container.id = `shape-${i}`;
+                
+                const miniGrid = createMiniGrid(shapeMatrix, shapeKey);
+                container.appendChild(miniGrid);
+                addDragListeners(container, i);
+                dock.appendChild(container);
+            }
+            
+            checkGameOverState();
+        }
+
+        function getSmartShape() {
+            if (difficulty === 'easy') {
+                return getEasyModeShape();
+            } else {
+                return getHardModeShape();
+            }
+        }
+
+        // --- Easy Mode AI: "The Helper" ---
+        function getEasyModeShape() {
+            // 1. Scan for "Almost Complete" lines
+            // We look for rows/cols with 6 or 7 filled blocks (gaps of 2 or 1)
+            
+            // Check Rows
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                let zeros = 0;
+                let contiguous = 0; 
+                // Simple gap check (not perfect contiguous logic, but good enough for heuristics)
+                for(let c=0; c<BOARD_SIZE; c++) if(grid[r][c] === 0) zeros++;
+                
+                if (zeros === 1) return { key: 'dot', matrix: SHAPES['dot'], fixed: true };
+                if (zeros === 2) {
+                    // 50% chance to give the helper piece
+                    if(Math.random() > 0.3) return { key: 'bar2', matrix: SHAPES['bar2'], fixed: false };
+                }
+            }
+
+            // Check Cols (Same logic)
+            for (let c = 0; c < BOARD_SIZE; c++) {
+                let zeros = 0;
+                for(let r=0; r<BOARD_SIZE; r++) if(grid[r][c] === 0) zeros++;
+                
+                if (zeros === 1) return { key: 'dot', matrix: SHAPES['dot'], fixed: true };
+                if (zeros === 2) {
+                    if(Math.random() > 0.3) return { key: 'bar2', matrix: rotateMatrix(SHAPES['bar2']), fixed: true }; // Vertical bar
+                }
+            }
+
+            // 2. If no obvious clear, give a piece that fits
+            const easyPool = ['dot', 'bar2', 'sq2', 'l2', 'bar3'];
+            let candidateKey = easyPool[Math.floor(Math.random() * easyPool.length)];
+            let candidateMatrix = SHAPES[candidateKey];
+
+            // Verify it fits at least somewhere in some rotation
+            if (canShapeFitAnywhere(candidateMatrix)) {
+                return { key: candidateKey, matrix: candidateMatrix, fixed: false };
+            }
+
+            // 3. Last Resort: Give a dot. Dots almost always fit unless board is 100% full.
+            return { key: 'dot', matrix: SHAPES['dot'], fixed: true };
+        }
+
+        // --- Hard Mode AI: "The Assassin" ---
+        function getHardModeShape() {
+            // Phase 1: Random (0-39 moves)
+            if (moves < 40) {
+                const keys = Object.keys(SHAPES);
+                const k = keys[Math.floor(Math.random() * keys.length)];
+                return { key: k, matrix: SHAPES[k], fixed: false };
+            }
+
+            // Phase 2: High Difficulty (40-44 moves)
+            if (moves >= 40 && moves < 45) {
+                const hardPool = ['sq3', 'bar5', 'l3', 'z3', 's3'];
+                const k = hardPool[Math.floor(Math.random() * hardPool.length)];
+                return { key: k, matrix: SHAPES[k], fixed: false };
+            }
+
+            // Phase 3: The Kill Switch (45+ moves)
+            // Find a shape that DOES NOT fit.
+            const keys = Object.keys(SHAPES);
+            
+            // Try 10 times to find an impossible shape
+            for(let i=0; i<10; i++) {
+                const k = keys[Math.floor(Math.random() * keys.length)];
+                let m = SHAPES[k];
+                // Random rotation for the check
+                const r = Math.floor(Math.random() * 4);
+                for(let j=0; j<r; j++) m = rotateMatrix(m);
+
+                if (!canShapeFitAnywhere(m)) {
+                    // Found a killer piece!
+                    return { key: k, matrix: m, fixed: true }; // Fixed so it stays in the impossible orientation
+                }
+            }
+
+            // If board is too empty and everything fits, give the largest possible blocks to clog it up
+            const cloggers = ['sq3', 'bar5', 'bar4'];
+            const k = cloggers[Math.floor(Math.random() * cloggers.length)];
+            return { key: k, matrix: SHAPES[k], fixed: false };
+        }
+
+
+        // --- Matrix & Validation Helpers ---
+
+        function rotateMatrix(matrix) {
+            const N = matrix.length;
+            const M = matrix[0].length;
+            let newMatrix = Array(M).fill().map(() => Array(N).fill(0));
+            for (let r = 0; r < N; r++) {
+                for (let c = 0; c < M; c++) {
+                    newMatrix[c][N - 1 - r] = matrix[r][c];
+                }
+            }
+            return newMatrix;
+        }
+
+        function canShapeFitAnywhere(matrix) {
+            // We check THIS specific orientation (no auto-rotation check inside here)
+            // Used by Hard Mode to verify impossibility of a specific shape instance
+            // Used by Easy Mode with rotations manually handled
+            
+            // However, for general gameplay "Can I survive?", we usually check all rotations.
+            // But for spawning logic, we want to know if *this matrix* fits.
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    if (checkFit(r, c, matrix)) return true;
+                }
+            }
+            return false;
+        }
+
+        // Used for Game Over detection (checks ALL rotations)
+        function canShapeFitAnyRotation(baseMatrix) {
+            let m = baseMatrix;
+            for(let i=0; i<4; i++) {
+                if (canShapeFitAnywhere(m)) return true;
+                m = rotateMatrix(m);
+            }
+            return false;
+        }
+
+        function createMiniGrid(matrix, key) {
+            const rows = matrix.length;
+            const cols = matrix[0].length;
+            const gridDiv = document.createElement('div');
+            gridDiv.className = 'mini-grid';
+            gridDiv.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+            
+            if (rows > 3 || cols > 3) gridDiv.style.transform = "scale(0.7)";
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'mini-cell';
+                    if (matrix[r][c] === 1) {
+                        cell.classList.add(COLOR_MAP[key]);
+                    } else {
+                        cell.style.opacity = '0';
+                    }
+                    gridDiv.appendChild(cell);
+                }
+            }
+            return gridDiv;
+        }
+
+        // --- Interaction Handlers ---
+
+        let draggedShapeIdx = null;
+        let ghostEl = null;
+
+        function addDragListeners(el, index) {
+            const startDrag = (e) => {
+                if (currentShapes[index].used) return;
+                e.preventDefault(); 
+                const touch = e.touches ? e.touches[0] : e;
+                draggedShapeIdx = index;
+                createGhost(index, touch.clientX, touch.clientY);
+                
+                document.addEventListener('mousemove', onMove, { passive: false });
+                document.addEventListener('touchmove', onMove, { passive: false });
+                document.addEventListener('mouseup', onEnd);
+                document.addEventListener('touchend', onEnd);
+                el.style.opacity = '0.3';
+            };
+            el.addEventListener('mousedown', startDrag);
+            el.addEventListener('touchstart', startDrag, { passive: false });
+        }
+
+        function createGhost(index, x, y) {
+            if (ghostEl) ghostEl.remove();
+            const shapeObj = currentShapes[index];
+            const shapeMatrix = shapeObj.data;
+            
+            ghostEl = document.createElement('div');
+            ghostEl.className = 'dragging-ghost';
+            ghostEl.style.gridTemplateColumns = `repeat(${shapeMatrix[0].length}, 1fr)`;
+            
+            const boardCell = document.querySelector('.cell');
+            const cellSize = boardCell.offsetWidth;
+            const gap = 4;
+            ghostEl.style.gap = gap + 'px';
+
+            shapeMatrix.forEach(row => {
+                row.forEach(val => {
+                    const cell = document.createElement('div');
+                    cell.style.width = cellSize + 'px';
+                    cell.style.height = cellSize + 'px';
+                    if (val === 1) {
+                        cell.classList.add(COLOR_MAP[shapeObj.key]);
+                        cell.style.opacity = '0.8';
+                    } else {
+                        cell.style.opacity = '0';
+                    }
+                    ghostEl.appendChild(cell);
+                });
+            });
+
+            document.body.appendChild(ghostEl);
+            updateGhostPos(x, y);
+        }
+
+        function updateGhostPos(x, y) {
+            if (!ghostEl) return;
+            ghostEl.style.left = x + 'px';
+            ghostEl.style.top = (y - 50) + 'px';
+        }
+
+        function onMove(e) {
+            e.preventDefault();
+            const touch = e.touches ? e.touches[0] : e;
+            updateGhostPos(touch.clientX, touch.clientY);
+            
+            const board = document.getElementById('game-board');
+            const boardRect = board.getBoundingClientRect();
+            const cellSize = document.querySelector('.cell').offsetWidth + 4;
+            const ghostRect = ghostEl.getBoundingClientRect();
+
+            const c = Math.round((ghostRect.left - boardRect.left) / cellSize);
+            const r = Math.round((ghostRect.top - boardRect.top) / cellSize);
+
+            clearHighlights();
+            
+            if (r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE) {
+                const shapeMatrix = currentShapes[draggedShapeIdx].data;
+                const canFit = checkFit(r, c, shapeMatrix);
+                previewShape(r, c, shapeMatrix, canFit);
+            }
+        }
+
+        function onEnd(e) {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('touchmove', onMove);
+            document.removeEventListener('mouseup', onEnd);
+            document.removeEventListener('touchend', onEnd);
+
+            let dropped = false;
+            if (ghostEl) {
+                const board = document.getElementById('game-board');
+                const boardRect = board.getBoundingClientRect();
+                const cellSize = document.querySelector('.cell').offsetWidth + 4;
+                const ghostRect = ghostEl.getBoundingClientRect();
+
+                const c = Math.round((ghostRect.left - boardRect.left) / cellSize);
+                const r = Math.round((ghostRect.top - boardRect.top) / cellSize);
+
+                if (checkFit(r, c, currentShapes[draggedShapeIdx].data)) {
+                    placeShape(r, c, draggedShapeIdx);
+                    dropped = true;
+                }
+                ghostEl.remove();
+                ghostEl = null;
+            }
+            
+            clearHighlights();
+            const dockEl = document.getElementById(`shape-${draggedShapeIdx}`);
+            dockEl.style.opacity = dropped ? '0' : '1';
+            if (dropped) dockEl.innerHTML = ''; 
+            draggedShapeIdx = null;
+        }
+
+        function checkFit(r, c, matrix) {
+            const h = matrix.length;
+            const w = matrix[0].length;
+            for (let i = 0; i < h; i++) {
+                for (let j = 0; j < w; j++) {
+                    if (matrix[i][j] === 1) {
+                        const boardR = r + i;
+                        const boardC = c + j;
+                        if (boardR < 0 || boardR >= BOARD_SIZE || boardC < 0 || boardC >= BOARD_SIZE) return false;
+                        if (grid[boardR][boardC] === 1) return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        function previewShape(r, c, matrix, isValid) {
+            const h = matrix.length;
+            const w = matrix[0].length;
+            const cells = document.querySelectorAll('.cell');
+            for (let i = 0; i < h; i++) {
+                for (let j = 0; j < w; j++) {
+                    if (matrix[i][j] === 1) {
+                        const boardR = r + i;
+                        const boardC = c + j;
+                        if (boardR >= 0 && boardR < BOARD_SIZE && boardC >= 0 && boardC < BOARD_SIZE) {
+                            const idx = boardR * BOARD_SIZE + boardC;
+                            if (grid[boardR][boardC] === 0) {
+                                cells[idx].classList.add(isValid ? 'preview-valid' : 'preview-invalid');
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        function clearHighlights() {
+            document.querySelectorAll('.cell').forEach(c => {
+                c.classList.remove('preview-valid', 'preview-invalid');
+            });
+        }
+
+        function placeShape(r, c, shapeIdx) {
+            const shapeObj = currentShapes[shapeIdx];
+            const matrix = shapeObj.data;
+            const colorClass = COLOR_MAP[shapeObj.key];
+            
+            shapeObj.used = true;
+            moves++; 
+            
+            const cells = document.querySelectorAll('.cell');
+            for (let i = 0; i < matrix.length; i++) {
+                for (let j = 0; j < matrix[0].length; j++) {
+                    if (matrix[i][j] === 1) {
+                        const br = r + i;
+                        const bc = c + j;
+                        grid[br][bc] = 1;
+                        const idx = br * BOARD_SIZE + bc;
+                        cells[idx].classList.add('filled', colorClass);
+                    }
+                }
+            }
+
+            checkForClears();
+            updateUI();
+
+            if (currentShapes.every(s => s.used)) {
+                setTimeout(spawnShapes, 300);
+            } else {
+                checkGameOverState();
+            }
+        }
+
+        function checkForClears() {
+            let rowsToClear = [];
+            let colsToClear = [];
+
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                if (grid[r].every(val => val === 1)) rowsToClear.push(r);
+            }
+
+            for (let c = 0; c < BOARD_SIZE; c++) {
+                let full = true;
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    if (grid[r][c] === 0) {
+                        full = false;
+                        break;
+                    }
+                }
+                if (full) colsToClear.push(c);
+            }
+
+            if (rowsToClear.length > 0 || colsToClear.length > 0) {
+                clearLines(rowsToClear, colsToClear);
+            }
+        }
+
+        function clearLines(rows, cols) {
+            const cells = document.querySelectorAll('.cell');
+            rows.forEach(r => {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    if (grid[r][c] !== 0) { 
+                        grid[r][c] = 0; 
+                        const idx = r * BOARD_SIZE + c;
+                        triggerClearAnim(cells[idx]);
+                    }
+                }
+            });
+            cols.forEach(c => {
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                     if (grid[r][c] !== 0 || rows.includes(r)) { 
+                         const idx = r * BOARD_SIZE + c;
+                         triggerClearAnim(cells[idx]);
+                         grid[r][c] = 0;
+                     }
+                }
+            });
+            const totalLines = rows.length + cols.length;
+            const basePoints = (rows.length * 8 + cols.length * 8) * 10;
+            const multiplier = totalLines * totalLines; 
+            score += basePoints * multiplier;
+        }
+
+        function triggerClearAnim(el) {
+            if(el.classList.contains('clearing')) return;
+            el.classList.add('clearing');
+            setTimeout(() => { el.className = 'cell'; }, 400);
+        }
+
+        function updateUI() {
+            document.getElementById('score-display').innerText = score;
+            document.getElementById('moves-display').innerText = moves;
+        }
+
+        // Game Over Check: Checks ALL rotations of available shapes
+        function checkGameOverState() {
+            const availableShapes = currentShapes.filter(s => !s.used);
+            if (availableShapes.length === 0) return;
+
+            let canMove = false;
+            for (let s of availableShapes) {
+                if (canShapeFitAnyRotation(s.data)) {
+                    canMove = true;
+                    break;
+                }
+            }
+
+            if (!canMove) {
+                setTimeout(() => {
+                    document.getElementById('final-score').innerText = score;
+                    document.getElementById('final-moves').innerText = moves;
+                    document.getElementById('game-over-modal').classList.remove('hidden');
+                }, 500);
+            }
+        }
+        
+        initGrid();
+
+    </script>
+</body>
+</html>
+
